@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "preinstall": "echo 'legacy-peer-deps=true' > .npmrc",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
