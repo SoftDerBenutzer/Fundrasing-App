@@ -1,3 +1,4 @@
+// Vercel Trigger Comment: 2026-03-17 11:08
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { MapContainer, TileLayer, GeoJSON, useMap, Marker, Popup, Polyline, Polygon, useMapEvents } from 'react-leaflet';
 import { LocateFixed, Search, Download, CloudOff, Map as MapIcon, Layers, List, BarChart2, FileDown, X, MessageSquare, PenTool, Moon, Sun, Filter, Trash2, Upload, MapPin, Route, Zap } from 'lucide-react';
