@@ -23,10 +23,19 @@ let DefaultIcon = L.icon({
 L.Marker.prototype.options.icon = DefaultIcon;
 
 type StatusColor = 'unvisited' | 'rot' | 'grün' | 'gelb';
+interface BuildingUnit {
+  id: string;
+  label: string;
+  status: StatusColor;
+  note?: string;
+}
+
 interface BuildingStatus {
   color: StatusColor;
   note: string;
   updatedAt: number;
+  type?: 'EFH' | 'MFH' | 'Gewerbe';
+  units?: BuildingUnit[];
 }
 type Tab = 'map' | 'heatmap' | 'list' | 'stats';
 
@@ -135,6 +144,11 @@ function App() {
   const [routeHouses, setRouteHouses] = useState<any[]>([]);
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
   const [showRouteMenu, setShowRouteMenu] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [loginError, setLoginError] = useState(false);
+
+  const APP_PASSWORD = 'rote-nasen-24'; // Password from the user or default
   const [dailyGoal, setDailyGoal] = useState(5);
   const [cheatMode, setCheatMode] = useState(false);
 
@@ -209,6 +223,12 @@ function App() {
     if (saved) {
       setStatuses(JSON.parse(saved));
     }
+    
+    // Check if previously authenticated
+    const auth = localStorage.getItem('appAuthenticated');
+    if (auth === 'true') {
+      setIsAuthenticated(true);
+    }
   }, []);
 
   // Save statuses when updated
@@ -228,7 +248,7 @@ function App() {
     setSelectedFeature(feature);
   };
 
-  const updateStatus = (featureId: string, color: StatusColor, note: string = '') => {
+  const updateStatus = (featureId: string, color: StatusColor, note: string = '', extra: Partial<BuildingStatus> = {}) => {
     // Haptic feedback
     if ('vibrate' in navigator) {
       navigator.vibrate(50);
@@ -237,12 +257,92 @@ function App() {
     setStatuses(prev => ({
       ...prev,
       [featureId]: {
+        ...prev[featureId], // Keep existing data like units if not overwritten
         color,
         note,
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
+        ...extra
       }
     }));
     setSelectedFeature(null);
+  };
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (passwordInput === APP_PASSWORD) {
+      setIsAuthenticated(true);
+      localStorage.setItem('appAuthenticated', 'true');
+      setLoginError(false);
+    } else {
+      setLoginError(true);
+      if ('vibrate' in navigator) navigator.vibrate([100, 50, 100]);
+    }
+  };
+
+  const getOSMTags = (feature: any) => {
+    const props = feature.properties || {};
+    const buildingType = props['building'];
+    const levels = parseInt(props['building:levels'] || '1');
+    const flatsCount = parseInt(props['building:flats'] || '0');
+    
+    // Auto-detect MFH
+    const isMFH = buildingType === 'apartments' || buildingType === 'residential' || levels > 2 || flatsCount > 1;
+    
+    return {
+      isMFH,
+      levels,
+      flatsCount: flatsCount || (isMFH ? levels * 2 : 0) // Fallback: 2 units per level if none specified
+    };
+  };
+
+  const generateUnits = (featureId: string, count: number) => {
+    const newUnits: BuildingUnit[] = [];
+    for (let i = 1; i <= count; i++) {
+      newUnits.push({
+        id: `unit-${i}`,
+        label: `Wohnung ${i}`,
+        status: 'unvisited'
+      });
+    }
+    
+    setStatuses(prev => ({
+      ...prev,
+      [featureId]: {
+        ...(prev[featureId] || { color: 'unvisited', note: '', updatedAt: Date.now() }),
+        type: 'MFH',
+        units: newUnits
+      }
+    }));
+  };
+
+  const updateUnitStatus = (featureId: string, unitId: string, status: StatusColor) => {
+    setStatuses(prev => {
+      const current = prev[featureId];
+      if (!current || !current.units) return prev;
+      
+      const newUnits = current.units.map(u => 
+        u.id === unitId ? { ...u, status } : u
+      );
+      
+      // Calculate overall status based on units
+      let overallStatus: StatusColor = 'unvisited';
+      const stats = { grün: 0, gelb: 0, rot: 0, total: newUnits.length };
+      newUnits.forEach(u => { if (u.status !== 'unvisited') stats[u.status as 'grün' | 'gelb' | 'rot']++; });
+      
+      if (stats.grün > 0) overallStatus = 'grün';
+      else if (stats.gelb > 0) overallStatus = 'gelb';
+      else if (stats.rot > 0 && stats.rot === stats.total) overallStatus = 'rot';
+
+      return {
+        ...prev,
+        [featureId]: {
+          ...current,
+          units: newUnits,
+          color: overallStatus,
+          updatedAt: Date.now()
+        }
+      };
+    });
   };
 
 
@@ -875,6 +975,92 @@ function App() {
 
 
 
+  if (!isAuthenticated) {
+    return (
+      <div style={{ 
+        height: '100vh', 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'center', 
+        background: isDarkMode ? '#121212' : '#f0f2f5',
+        fontFamily: '-apple-system, system-ui, sans-serif'
+      }}>
+        <div style={{ 
+          width: '90%', 
+          maxWidth: 400, 
+          background: isDarkMode ? '#1e1e1e' : 'white', 
+          padding: 40, 
+          borderRadius: 24, 
+          boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+          textAlign: 'center'
+        }}>
+          <div style={{ 
+            width: 80, 
+            height: 80, 
+            background: PRIMARY_RED, 
+            borderRadius: '50%', 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center', 
+            margin: '0 auto 24px',
+            boxShadow: `0 8px 16px ${PRIMARY_RED}44`
+          }}>
+            <Zap size={40} color="white" />
+          </div>
+          <h2 style={{ fontSize: 24, fontWeight: 700, color: isDarkMode ? 'white' : '#1a1a1a', marginBottom: 8 }}>Willkommen</h2>
+          <p style={{ color: isDarkMode ? '#aaa' : '#666', marginBottom: 32 }}>Bitte gib das Passwort ein, um die Fundraising-Karte zu nutzen.</p>
+          
+          <form onSubmit={handleLogin}>
+            <input 
+              type="password" 
+              placeholder="Passwort"
+              value={passwordInput}
+              onChange={(e) => setPasswordInput(e.target.value)}
+              style={{ 
+                width: '100%', 
+                padding: '16px 20px', 
+                borderRadius: 12, 
+                border: loginError ? `2px solid ${PRIMARY_RED}` : (isDarkMode ? '1px solid #333' : '1px solid #ddd'),
+                background: isDarkMode ? '#2a2a2a' : '#f9f9f9',
+                color: isDarkMode ? 'white' : 'black',
+                fontSize: 16,
+                marginBottom: 16,
+                outline: 'none',
+                transition: 'all 0.2s',
+                boxSizing: 'border-box'
+              }}
+            />
+            {loginError && <p style={{ color: PRIMARY_RED, fontSize: 13, marginTop: -8, marginBottom: 16, textAlign: 'left', fontWeight: '500' }}>Falsches Passwort!</p>}
+            <button 
+              type="submit"
+              style={{ 
+                width: '100%', 
+                padding: 16, 
+                borderRadius: 12, 
+                border: 'none', 
+                background: PRIMARY_RED, 
+                color: 'white', 
+                fontSize: 16, 
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                boxShadow: `0 4px 12px ${PRIMARY_RED}33`,
+                transition: 'transform 0.1s active'
+              }}
+            >
+              Anmelden
+            </button>
+          </form>
+          
+          <div style={{ marginTop: 40, borderTop: isDarkMode ? '1px solid #333' : '1px solid #eee', paddingTop: 20 }}>
+            <button onClick={() => setIsDarkMode(!isDarkMode)} style={{ background: 'none', border: 'none', color: isDarkMode ? '#aaa' : '#999', cursor: 'pointer', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%' }}>
+              {isDarkMode ? <Sun size={18} /> : <Moon size={18} />} {isDarkMode ? 'Heller Modus' : 'Dunkler Modus'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: getThemeBackground(), fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif' }}>
 
@@ -1279,6 +1465,72 @@ function App() {
             />
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 10 }}>
+              {/* Unit Management Section */}
+              {(() => {
+                const stat = statuses[selectedFeature.id];
+                const osm = getOSMTags(selectedFeature);
+                
+                if (stat?.units && stat.units.length > 0) {
+                  return (
+                    <div style={{ marginBottom: 20, background: isDarkMode ? '#222' : '#f9f9f9', padding: 12, borderRadius: 12 }}>
+                      <h4 style={{ margin: '0 0 10px', fontSize: 14, color: '#999', textTransform: 'uppercase' }}>Wohneinheiten ({stat.units.length})</h4>
+                      <div style={{ maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {stat.units.map(unit => (
+                          <div key={unit.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: isDarkMode ? '#333' : 'white', borderRadius: 8 }}>
+                            <span style={{ fontSize: 14, fontWeight: '500' }}>{unit.label}</span>
+                            <div style={{ display: 'flex', gap: 4 }}>
+                              {(['rot', 'gelb', 'grün'] as StatusColor[]).map(c => (
+                                <button
+                                  key={c}
+                                  onClick={() => updateUnitStatus(selectedFeature.id, unit.id, c)}
+                                  style={{ 
+                                    width: 24, height: 24, borderRadius: '50%', border: 'none', 
+                                    background: unit.status === c ? (c === 'grün' ? SUCCESS_GREEN : c === 'gelb' ? WARNING_YELLOW : PRIMARY_RED) : (isDarkMode ? '#444' : '#eee'),
+                                    transition: 'all 0.2s'
+                                  }}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <button 
+                        onClick={() => generateUnits(selectedFeature.id, 0)} // Reset / Clear units
+                        style={{ marginTop: 10, background: 'none', border: 'none', color: PRIMARY_RED, fontSize: 12, padding: 0 }}
+                      >
+                        Einheiten löschen / Zu EFH wechseln
+                      </button>
+                    </div>
+                  );
+                } else {
+                  return (
+                    <div style={{ marginBottom: 20 }}>
+                      {osm.isMFH && (
+                        <div style={{ background: 'rgba(37, 99, 235, 0.1)', color: '#2563eb', padding: '10px 14px', borderRadius: 12, fontSize: 13, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <Zap size={16} />
+                          <span>Mehrfamilienhaus erkannt ({osm.flatsCount} Einheiten möglich)</span>
+                          <button 
+                            onClick={() => generateUnits(selectedFeature.id, osm.flatsCount)}
+                            style={{ marginLeft: 'auto', background: '#2563eb', color: 'white', border: 'none', padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 'bold' }}
+                          >
+                            Generieren
+                          </button>
+                        </div>
+                      )}
+                      
+                      {!osm.isMFH && (
+                        <button 
+                          onClick={() => generateUnits(selectedFeature.id, 5)} // Manual fallback
+                          style={{ width: '100%', padding: '10px', background: 'none', border: `1px dashed ${isDarkMode ? '#555' : '#ccc'}`, color: '#888', borderRadius: 12, fontSize: 13, marginBottom: 10 }}
+                        >
+                          + Als Mehrfamilienhaus markieren
+                        </button>
+                      )}
+                    </div>
+                  );
+                }
+              })()}
+
               <button onClick={() => updateStatus(selectedFeature.id, 'grün', (document.getElementById('note-input') as HTMLTextAreaElement).value)} style={{ padding: 16, background: SUCCESS_GREEN, color: 'white', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 'bold' }}>Vertrag erfolgreich</button>
               <button onClick={() => updateStatus(selectedFeature.id, 'gelb', (document.getElementById('note-input') as HTMLTextAreaElement).value)} style={{ padding: 16, background: WARNING_YELLOW, color: '#555', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 'bold' }}>Nicht angetroffen</button>
               <button onClick={() => updateStatus(selectedFeature.id, 'rot', (document.getElementById('note-input') as HTMLTextAreaElement).value)} style={{ padding: 16, background: PRIMARY_RED, color: 'white', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 'bold' }}>Abgelehnt</button>
